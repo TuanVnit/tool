@@ -359,38 +359,51 @@ Route::get('gen_db', function(){
             COLUMN_NAME,
             DATA_TYPE,
             (CASE  WHEN IS_NULLABLE = 'NO' THEN 'YES' ELSE '' END) as IS_NULLABLE,
-            COLUMN_DEFAULT
+            COLUMN_DEFAULT,
+            COLUMN_COMMENT as comments
 
         FROM
             INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = 'tostem_db_it_20210825'
+        WHERE TABLE_SCHEMA = 'led2023_15'
         order by TABLE_NAME, ORDINAL_POSITION
     ";
 
-    $data_tables = DB::connection(env('DB_CONNECTION_2', 'mysql2'))->select($sql_table_str);
-
+    $data_tables = DB::select($sql_table_str);
     $sql_get_pri_unique = "
-        select stat.table_schema as database_name,
-               stat.table_name,
-               stat.index_name,
-               group_concat(stat.column_name
-                    order by stat.seq_in_index separator ', ') as columns,
-               tco.constraint_type
-        from information_schema.statistics stat
-        join information_schema.table_constraints tco
-             on stat.table_schema = tco.table_schema
-             and stat.table_name = tco.table_name
-             and stat.index_name = tco.constraint_name
-        where stat.table_schema = 'tostem_db_it_20210825'
-        group by stat.table_schema,
-                 stat.table_name,
-                 stat.index_name,
-                 tco.constraint_type
-        order by stat.table_schema,
-                 stat.table_name;
-    ";
+        SELECT
+            stat.table_schema AS database_name,
+            stat.table_name,
+            stat.index_name,
+            group_concat(stat.column_name ORDER BY stat.seq_in_index SEPARATOR ', ') AS columns,
+            group_concat(col.COLUMN_COMMENT ORDER BY stat.seq_in_index SEPARATOR ', ') AS comments,
+            tco.constraint_type
+        FROM
+            information_schema.statistics stat
+        JOIN
+            information_schema.table_constraints tco
+            ON stat.table_schema = tco.table_schema
+            AND stat.table_name = tco.table_name
+            AND stat.index_name = tco.constraint_name
+        JOIN
+            information_schema.columns col
+            ON stat.table_schema = col.table_schema
+            AND stat.table_name = col.table_name
+            AND stat.column_name = col.column_name
+        WHERE
+            stat.table_schema = 'led2023_15'
+        GROUP BY
+            stat.table_schema,
+            stat.table_name,
+            stat.index_name,
+            tco.constraint_type
+        ORDER BY
+            stat.table_schema,
+            stat.table_name,
+            stat.index_name;
 
-    $data_indexs = DB::connection(env('DB_CONNECTION_2', 'mysql2'))->select($sql_get_pri_unique);
+            ";
+
+    $data_indexs = DB::select($sql_get_pri_unique);
 
     $tables = [];
     $datas = [];
@@ -415,6 +428,7 @@ Route::get('gen_db', function(){
         $datas[$table_name][$dkey]['data_type'] = $data_table->DATA_TYPE;
         $datas[$table_name][$dkey]['not_null'] = $data_table->IS_NULLABLE == 'YES' ? 'Yes':'';
         $datas[$table_name][$dkey]['column_default'] = $data_table->COLUMN_DEFAULT ?? '';
+        $datas[$table_name][$dkey]['comments'] = $data_table->comments ?? '';
         $tables[$table_name] = $table_name;
     }
 
@@ -423,16 +437,27 @@ Route::get('gen_db', function(){
     $str_q = '(\''.implode("','", $tbls).'\')';
     $sql_get_f = "
         SELECT
-          TABLE_NAME,COLUMN_NAME,CONSTRAINT_NAME, REFERENCED_TABLE_NAME,REFERENCED_COLUMN_NAME
+            k.TABLE_NAME,
+            k.COLUMN_NAME,
+            k.CONSTRAINT_NAME,
+            k.REFERENCED_TABLE_NAME,
+            k.REFERENCED_COLUMN_NAME,
+            c.COLUMN_COMMENT as comment
         FROM
-          INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+            INFORMATION_SCHEMA.KEY_COLUMN_USAGE k
+        JOIN
+            INFORMATION_SCHEMA.COLUMNS c
+        ON
+            k.TABLE_NAME = c.TABLE_NAME
+            AND k.COLUMN_NAME = c.COLUMN_NAME
         WHERE
-          REFERENCED_TABLE_SCHEMA = 'tostem_db_it_20210825' AND
-          TABLE_NAME IN $str_q
-        order by TABLE_NAME
+            k.REFERENCED_TABLE_SCHEMA = 'led2023_15'
+            AND c.TABLE_SCHEMA = 'led2023_15'
+        ORDER BY
+            k.TABLE_NAME;
     ";
 
-    $data_fr = DB::connection(env('DB_CONNECTION_2', 'mysql2'))->select($sql_get_f);
+    $data_fr = DB::select($sql_get_f);
     $data_frs = [];
     foreach ($data_fr as $key => $data_fr_value) {
         $table = $data_fr_value->TABLE_NAME;
@@ -475,26 +500,57 @@ Route::get('gen_db', function(){
 
 
     //template file
-    $file = storage_path('O2O_20210825.xlsx');
+    //template file
+    $file = storage_path('db_cyinder_gatelock.xlsx');
     $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file);
-    $sheetNames = $spreadsheet->getSheetNames();
-    foreach ($sheetNames as $sheetName) {
-        $table = $sheetName;
-        if (!in_array($sheetName, $tables)) {
-            if ($sheetName == 'history_import_product_selling_') {
-                $table = 'history_import_product_selling_code_price';
-            } else if ($sheetName == 't_data_convert_update_data_gies') {
-                $table = 't_data_convert_update_data_giesta';
-            } else {
-                continue;
-            }
+    // Add export all table TuanHa 2022.05.25
+    $spreadsheet->setActiveSheetIndex(0);
+    $i = 2; //  bắt đầu ghi vào tên các table từ dòng thứ 2
+    foreach( $tables as $table) {
+        $spreadsheet->getActiveSheet()->SetCellValue('A'.$i, ($i-1));
+        $spreadsheet->getActiveSheet()->SetCellValue('B'.$i, $table);
+        $spreadsheet->getActiveSheet()->getCell('B'.$i)->getHyperlink()->setUrl("sheet://'" .  substr($table, 0, 30) . "'!A1"); // gắn hyperlink từ bảng chính tới sheet table.
+        // Định dạng màu xanh cho hyperlink
+        $spreadsheet->getActiveSheet()->getStyle('B'.$i)->applyFromArray([
+            'font' => [
+                'color' => ['rgb' => '0000FF'], // Màu xanh
+                'underline' => 'single' // Gạch chân để giống hyperlink
+            ]
+        ]);
+        $i++;
+    }
+
+    $spreadsheet->getActiveSheet()->getStyle('A1:B'.($i-1))->getBorders()
+        ->getAllBorders()
+        ->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+    // End export all table TuanHa 2022.05.25
+    foreach ($tables as $table) {
+        $clonedWorksheet = clone $spreadsheet->getSheetByName('template');
+        $clonedWorksheet->setTitle(substr($table, 0, 30));
+        $spreadsheet->addSheet($clonedWorksheet);
+        // Những bảng có ký tự 'yoyaku' hoặc 'zimmer' thì tô màu sheet đó lên.
+//        if(strpos($table, "yoyaku") !== FALSE || strpos($table, "zimmer") !== FALSE) {
+//            $spreadsheet->setActiveSheetIndexByName(substr($table, 0, 30))->getTabColor()->setARGB('FF0000');
+//        } else {
+//            $spreadsheet->setActiveSheetIndexByName(substr($table, 0, 30));
+//        }
+        $spreadsheet->setActiveSheetIndexByName(substr($table, 0, 30));
+
+        $worksheet = $spreadsheet->getActiveSheet();
+        $logic_final = $table;
+        if (strpos($logic_final, 't_') === 0) {
+            $logic_final = substr($logic_final, 2);
         }
 
-        $spreadsheet->setActiveSheetIndexByName($sheetName);
-        $worksheet = $spreadsheet->getActiveSheet();
-
+        // Kiểm tra và loại bỏ 'c_' nếu có
+        if (strpos($logic_final, 'm_') === 0) {
+            $logic_final = substr($logic_final, 2);
+        }
+        $logic_name = $logic_final;
+        $worksheet->getCell('C5')->setValue(ucwords(str_replace('_', " ", $logic_name)));
         $worksheet->getCell('C6')->setValue($table);
-        $worksheet->getCell('F5')->setValue('MySQL');
+        $worksheet->getCell('F5')->setValue('PgSQL');
+
         $data_struct = $datas[$table];
         $data_p = [];
         if (isset($datas_pri_uni[$table])) {
@@ -504,7 +560,6 @@ Route::get('gen_db', function(){
         if (isset($data_frs[$table])) {
             $data_fa = $data_frs[$table];
         }
-
         foreach ($worksheet->getRowIterator() as $k_row => $row) {
             foreach( $row->getCellIterator() as $k_col => $cell ){
                 $value = $cell->getCalculatedValue();
@@ -512,33 +567,43 @@ Route::get('gen_db', function(){
                     $new_row = $k_row + 2;
                     foreach ($data_struct as $data_s) {
                         $worksheet->insertNewRowBefore($new_row, 1);
-                        $spreadsheet->getActiveSheet()->getStyle('A'.$new_row)->getFill()
-                            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                            ->getStartColor()->setARGB('ffffff');
-                        $spreadsheet->getActiveSheet()->getStyle('B'.$new_row)->getFill()
-                            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                            ->getStartColor()->setARGB('ffffff');
-                        $spreadsheet->getActiveSheet()->getStyle('C'.$new_row)->getFill()
-                            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                            ->getStartColor()->setARGB('ffffff');
-                        $spreadsheet->getActiveSheet()->getStyle('D'.$new_row)->getFill()
-                            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                            ->getStartColor()->setARGB('ffffff');
-                        $spreadsheet->getActiveSheet()->getStyle('E'.$new_row)->getFill()
-                            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                            ->getStartColor()->setARGB('ffffff');
-                        $spreadsheet->getActiveSheet()->getStyle('F'.$new_row)->getFill()
-                            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                            ->getStartColor()->setARGB('ffffff');
-                        $spreadsheet->getActiveSheet()->getStyle('G'.$new_row)->getFill()
-                            ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                            ->getStartColor()->setARGB('ffffff');
+                        // $spreadsheet->getActiveSheet()->getStyle('A'.$new_row)->getFill()
+                        //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                        //     ->getStartColor()->setARGB('ffffff');
+                        // $spreadsheet->getActiveSheet()->getStyle('B'.$new_row)->getFill()
+                        //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                        //     ->getStartColor()->setARGB('ffffff');
+                        // $spreadsheet->getActiveSheet()->getStyle('C'.$new_row)->getFill()
+                        //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                        //     ->getStartColor()->setARGB('ffffff');
+                        // $spreadsheet->getActiveSheet()->getStyle('D'.$new_row)->getFill()
+                        //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                        //     ->getStartColor()->setARGB('ffffff');
+                        // $spreadsheet->getActiveSheet()->getStyle('E'.$new_row)->getFill()
+                        //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                        //     ->getStartColor()->setARGB('ffffff');
+                        // $spreadsheet->getActiveSheet()->getStyle('F'.$new_row)->getFill()
+                        //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                        //     ->getStartColor()->setARGB('ffffff');
+                        // $spreadsheet->getActiveSheet()->getStyle('G'.$new_row)->getFill()
+                        //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                        //     ->getStartColor()->setARGB('ffffff');
+                        // Thiết lập màu nền cho các ô từ cột A đến G
+                        $columns = range('A', 'G');
+                        foreach ($columns as $column) {
+                            $spreadsheet->getActiveSheet()->getStyle($column.$new_row)->getFill()
+                                ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                                ->getStartColor()->setARGB('ffffff');
+                            // Bỏ in đậm cho các ô từ cột A đến G
+                            $spreadsheet->getActiveSheet()->getStyle($column.$new_row)->getFont()->setBold(false);
+                        }
                         $worksheet->getCell('A'.$new_row)->setValue($data_s['no']);
                         $worksheet->getCell('B'.$new_row)->setValue($data_s['name_jp']);
                         $worksheet->getCell('C'.$new_row)->setValue($data_s['column_name']);
                         $worksheet->getCell('D'.$new_row)->setValue($data_s['data_type']);
                         $worksheet->getCell('E'.$new_row)->setValue($data_s['not_null']);
                         $worksheet->getCell('F'.$new_row)->setValue($data_s['column_default']);
+                        $worksheet->getCell('G'.$new_row)->setValue($data_s['comments']);
                         $new_row++;
                     }
                 }
@@ -554,27 +619,35 @@ Route::get('gen_db', function(){
                         $new_row = $k_row + 2;
                         foreach ($data_p as $dp) {
                             $worksheet->insertNewRowBefore($new_row, 1);
-                            $spreadsheet->getActiveSheet()->getStyle('A'.$new_row)->getFill()
-                                ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                ->getStartColor()->setARGB('ffffff');
-                            $spreadsheet->getActiveSheet()->getStyle('B'.$new_row)->getFill()
-                                ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                ->getStartColor()->setARGB('ffffff');
-                            $spreadsheet->getActiveSheet()->getStyle('C'.$new_row)->getFill()
-                                ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                ->getStartColor()->setARGB('ffffff');
-                            $spreadsheet->getActiveSheet()->getStyle('D'.$new_row)->getFill()
-                                ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                ->getStartColor()->setARGB('ffffff');
-                            $spreadsheet->getActiveSheet()->getStyle('E'.$new_row)->getFill()
-                                ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                ->getStartColor()->setARGB('ffffff');
-                            $spreadsheet->getActiveSheet()->getStyle('F'.$new_row)->getFill()
-                                ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                ->getStartColor()->setARGB('ffffff');
-                            $spreadsheet->getActiveSheet()->getStyle('G'.$new_row)->getFill()
-                                ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                ->getStartColor()->setARGB('ffffff');
+                            // $spreadsheet->getActiveSheet()->getStyle('A'.$new_row)->getFill()
+                            //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                            //     ->getStartColor()->setARGB('ffffff');
+                            // $spreadsheet->getActiveSheet()->getStyle('B'.$new_row)->getFill()
+                            //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                            //     ->getStartColor()->setARGB('ffffff');
+                            // $spreadsheet->getActiveSheet()->getStyle('C'.$new_row)->getFill()
+                            //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                            //     ->getStartColor()->setARGB('ffffff');
+                            // $spreadsheet->getActiveSheet()->getStyle('D'.$new_row)->getFill()
+                            //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                            //     ->getStartColor()->setARGB('ffffff');
+                            // $spreadsheet->getActiveSheet()->getStyle('E'.$new_row)->getFill()
+                            //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                            //     ->getStartColor()->setARGB('ffffff');
+                            // $spreadsheet->getActiveSheet()->getStyle('F'.$new_row)->getFill()
+                            //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                            //     ->getStartColor()->setARGB('ffffff');
+                            // $spreadsheet->getActiveSheet()->getStyle('G'.$new_row)->getFill()
+                            //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                            //     ->getStartColor()->setARGB('ffffff');
+                            $columns = range('A', 'G');
+                            foreach ($columns as $column) {
+                                $spreadsheet->getActiveSheet()->getStyle($column.$new_row)->getFill()
+                                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                                    ->getStartColor()->setARGB('ffffff');
+                                // Bỏ in đậm cho các ô từ cột A đến G
+                                $spreadsheet->getActiveSheet()->getStyle($column.$new_row)->getFont()->setBold(false);
+                            }
                             $worksheet->getCell('A'.$new_row)->setValue($dp['no']);
                             $worksheet->getCell('B'.$new_row)->setValue($dp['name']);
                             $worksheet->getCell('C'.$new_row)->setValue($dp['column']);
@@ -597,27 +670,35 @@ Route::get('gen_db', function(){
                             $new_row = $k_row + 2;
                             foreach ($data_fa as $df) {
                                 $worksheet->insertNewRowBefore($new_row, 1);
-                                $spreadsheet->getActiveSheet()->getStyle('A'.$new_row)->getFill()
-                                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                    ->getStartColor()->setARGB('ffffff');
-                                $spreadsheet->getActiveSheet()->getStyle('B'.$new_row)->getFill()
-                                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                    ->getStartColor()->setARGB('ffffff');
-                                $spreadsheet->getActiveSheet()->getStyle('C'.$new_row)->getFill()
-                                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                    ->getStartColor()->setARGB('ffffff');
-                                $spreadsheet->getActiveSheet()->getStyle('D'.$new_row)->getFill()
-                                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                    ->getStartColor()->setARGB('ffffff');
-                                $spreadsheet->getActiveSheet()->getStyle('E'.$new_row)->getFill()
-                                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                    ->getStartColor()->setARGB('ffffff');
-                                $spreadsheet->getActiveSheet()->getStyle('F'.$new_row)->getFill()
-                                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                    ->getStartColor()->setARGB('ffffff');
-                                $spreadsheet->getActiveSheet()->getStyle('G'.$new_row)->getFill()
-                                    ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
-                                    ->getStartColor()->setARGB('ffffff');
+                                // $spreadsheet->getActiveSheet()->getStyle('A'.$new_row)->getFill()
+                                //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                                //     ->getStartColor()->setARGB('ffffff');
+                                // $spreadsheet->getActiveSheet()->getStyle('B'.$new_row)->getFill()
+                                //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                                //     ->getStartColor()->setARGB('ffffff');
+                                // $spreadsheet->getActiveSheet()->getStyle('C'.$new_row)->getFill()
+                                //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                                //     ->getStartColor()->setARGB('ffffff');
+                                // $spreadsheet->getActiveSheet()->getStyle('D'.$new_row)->getFill()
+                                //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                                //     ->getStartColor()->setARGB('ffffff');
+                                // $spreadsheet->getActiveSheet()->getStyle('E'.$new_row)->getFill()
+                                //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                                //     ->getStartColor()->setARGB('ffffff');
+                                // $spreadsheet->getActiveSheet()->getStyle('F'.$new_row)->getFill()
+                                //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                                //     ->getStartColor()->setARGB('ffffff');
+                                // $spreadsheet->getActiveSheet()->getStyle('G'.$new_row)->getFill()
+                                //     ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                                //     ->getStartColor()->setARGB('ffffff');
+                                $columns = range('A', 'G');
+                                foreach ($columns as $column) {
+                                    $spreadsheet->getActiveSheet()->getStyle($column.$new_row)->getFill()
+                                        ->setFillType(\PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID)
+                                        ->getStartColor()->setARGB('ffffff');
+                                    // Bỏ in đậm cho các ô từ cột A đến G
+                                    $spreadsheet->getActiveSheet()->getStyle($column.$new_row)->getFont()->setBold(false);
+                                }
                                 $worksheet->getCell('A'.$new_row)->setValue($df['no']);
                                 $worksheet->getCell('B'.$new_row)->setValue($df["name"]);
                                 $worksheet->getCell('C'.$new_row)->setValue($df['column']);
@@ -636,9 +717,14 @@ Route::get('gen_db', function(){
             dd($e->getMessage());
         }
     }
-
+    // Sau khi export xong thì xóa sheet template ở file mẫu đi.
+    $spreadsheet->setActiveSheetIndexByName('template');
+    $sheetIndex = $spreadsheet->getActiveSheetIndex();
+    $spreadsheet->removeSheetByIndex($sheetIndex);
+    // Kết thúc xóa sheet template
     $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
-    $writer->save('write.xlsx');
+    $filename = 'db_structure_' . date('Ymd_His') . '.xlsx';
+    $writer->save($filename);
 
     dd('done');
 });
