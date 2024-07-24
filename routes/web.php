@@ -2,7 +2,7 @@
 
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
-Route::get('gen_db_pg', function() {	    
+Route::get('gen_db_pg', function() {
     $tableNames = config('dict.table_ignore'); // Loại bỏ những table không cần export
 
 // Chuyển đổi mảng thành chuỗi các tên bảng được phân cách bởi dấu phẩy và bao quanh bởi dấu nháy đơn
@@ -10,16 +10,16 @@ Route::get('gen_db_pg', function() {
     $sql_table_str = "
                 SELECT z.table_name, z2.column_name, z2.data_type, z2.column_default, z2.is_nullable, pg_catalog.col_description(pgc.oid, z2.ordinal_position::int) as comment
 		    FROM information_schema.tables z
-				JOIN information_schema.columns z2 on z.table_name = z2.table_name  
-                JOIN pg_catalog.pg_class pgc ON z.table_name = pgc.relname 
-		WHERE table_type = 'BASE TABLE' 
+				JOIN information_schema.columns z2 on z.table_name = z2.table_name
+                JOIN pg_catalog.pg_class pgc ON z.table_name = pgc.relname
+		WHERE table_type = 'BASE TABLE'
 		    AND z.table_schema NOT IN ('pg_catalog', 'information_schema')
             AND NOT pgc.relispartition    -- exclude child partitions -- add by Tuanhv-27-05-2022
             AND z.table_name NOT IN ($tableNamesString)
 		order by z.table_name, z2.ordinal_position
     ";
-	
-    $data_tables = DB::select($sql_table_str);	   
+
+    $data_tables = DB::select($sql_table_str);
 
     $sql_get_pri_unique = "
         with t1 as (
@@ -30,7 +30,7 @@ Route::get('gen_db_pg', function() {
 		       kcu.column_name,
 					 tco.constraint_type
 		from information_schema.table_constraints tco
-		join information_schema.key_column_usage kcu 
+		join information_schema.key_column_usage kcu
 		     on kcu.constraint_name = tco.constraint_name
 		     and kcu.constraint_schema = tco.constraint_schema
 		     and kcu.constraint_name = tco.constraint_name
@@ -42,14 +42,14 @@ Route::get('gen_db_pg', function() {
 		) select table_name, constraint_name as index_name, string_agg(t1.column_name, ',') as columns, constraint_type
 		from t1 group by table_name, constraint_name,constraint_type
     ";
-    
+
     $data_indexs = \DB::select($sql_get_pri_unique);
-    // how to fix $data_indexs to get all table name    
+    // how to fix $data_indexs to get all table name
 
     $tables = [];
     $datas = [];
     $no = 1;
-    $fields_not_comment = [];    
+    $fields_not_comment = [];
     foreach ($data_tables as $dkey => $data_table) {
         // if ($data_table->comment) {
         //     $namejp = $data_table->comment;
@@ -60,9 +60,9 @@ Route::get('gen_db_pg', function() {
                 $namejp = ucwords(str_replace('_', " ", $data_table->column_name)) ;
                 $fields_not_comment[$data_table->table_name][] = $data_table->column_name;
             }
-        // }        
+        // }
         // $table_name = strtolower(substr($data_table->table_name, 0, 30));
-        $table_name = strtolower($data_table->table_name);                               
+        $table_name = strtolower($data_table->table_name);
         $datas[$table_name][$dkey]['no'] = $dkey;
         $datas[$table_name][$dkey]['name_jp'] = $namejp;
         $datas[$table_name][$dkey]['column_name'] = $data_table->column_name;
@@ -71,7 +71,7 @@ Route::get('gen_db_pg', function() {
         $datas[$table_name][$dkey]['column_default'] = $data_table->column_default ?? '';
         $datas[$table_name][$dkey]['comment'] = $data_table->comment ?? '';
         $tables[$table_name] = $table_name;
-    }        
+    }
     foreach ($fields_not_comment as $key_table => $item) {
         $list_error = '';
         foreach ($item as $key => $value) {
@@ -146,16 +146,17 @@ Route::get('gen_db_pg', function() {
         ->getAllBorders()
         ->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
     // End export all table TuanHa 2022.05.25
-    foreach ($tables as $table) {        
+    foreach ($tables as $table) {
         $clonedWorksheet = clone $spreadsheet->getSheetByName('template');
         $clonedWorksheet->setTitle(substr($table, 0, 30));
         $spreadsheet->addSheet($clonedWorksheet);
         // Những bảng có ký tự 'yoyaku' hoặc 'zimmer' thì tô màu sheet đó lên.
-        if(strpos($table, "yoyaku") !== FALSE || strpos($table, "zimmer") !== FALSE) {
-            $spreadsheet->setActiveSheetIndexByName(substr($table, 0, 30))->getTabColor()->setARGB('FF0000');
-        } else {
-            $spreadsheet->setActiveSheetIndexByName(substr($table, 0, 30));
-        }
+//        if(strpos($table, "yoyaku") !== FALSE || strpos($table, "zimmer") !== FALSE) {
+//            $spreadsheet->setActiveSheetIndexByName(substr($table, 0, 30))->getTabColor()->setARGB('FF0000');
+//        } else {
+//            $spreadsheet->setActiveSheetIndexByName(substr($table, 0, 30));
+//        }
+        $spreadsheet->setActiveSheetIndexByName(substr($table, 0, 30));
 
         $worksheet = $spreadsheet->getActiveSheet();
         $logic_final = $table;
@@ -167,7 +168,7 @@ Route::get('gen_db_pg', function() {
         if (strpos($logic_final, 'm_') === 0) {
             $logic_final = substr($logic_final, 2);
         }
-        $logic_name = $logic_final;        
+        $logic_name = $logic_final;
         $worksheet->getCell('C5')->setValue(ucwords(str_replace('_', " ", $logic_name)));
         $worksheet->getCell('C6')->setValue($table);
         $worksheet->getCell('F5')->setValue('PgSQL');
@@ -180,7 +181,7 @@ Route::get('gen_db_pg', function() {
         $data_fa = [];
         if (isset($data_frs[$table])) {
             $data_fa = $data_frs[$table];
-        }		
+        }
         foreach ($worksheet->getRowIterator() as $k_row => $row) {
             foreach( $row->getCellIterator() as $k_col => $cell ){
                 $value = $cell->getCalculatedValue();
@@ -345,7 +346,7 @@ Route::get('gen_db_pg', function() {
     // Kết thúc xóa sheet template
     $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
     $filename = 'db_structure_' . date('Ymd_His') . '.xlsx';
-    $writer->save($filename);    
+    $writer->save($filename);
 
     dd('done');
 });
@@ -359,7 +360,7 @@ Route::get('gen_db', function(){
             DATA_TYPE,
             (CASE  WHEN IS_NULLABLE = 'NO' THEN 'YES' ELSE '' END) as IS_NULLABLE,
             COLUMN_DEFAULT
-            
+
         FROM
             INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_SCHEMA = 'tostem_db_it_20210825'
@@ -421,7 +422,7 @@ Route::get('gen_db', function(){
 
     $str_q = '(\''.implode("','", $tbls).'\')';
     $sql_get_f = "
-        SELECT 
+        SELECT
           TABLE_NAME,COLUMN_NAME,CONSTRAINT_NAME, REFERENCED_TABLE_NAME,REFERENCED_COLUMN_NAME
         FROM
           INFORMATION_SCHEMA.KEY_COLUMN_USAGE
