@@ -2,7 +2,7 @@
 
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
-Route::get('gen_db_pg', function() {
+Route::get('gen_db_pg', function() {    
     $tableNames = config('dict.table_ignore'); // Loại bỏ những table không cần export
 
 // Chuyển đổi mảng thành chuỗi các tên bảng được phân cách bởi dấu phẩy và bao quanh bởi dấu nháy đơn
@@ -15,7 +15,7 @@ Route::get('gen_db_pg', function() {
 		WHERE table_type = 'BASE TABLE'
 		    AND z.table_schema NOT IN ('pg_catalog', 'information_schema')
             AND NOT pgc.relispartition    -- exclude child partitions -- add by Tuanhv-27-05-2022
-            AND z.table_name NOT IN ($tableNamesString)
+            --AND z.table_name NOT IN ($tableNamesString)
 		order by z.table_name, z2.ordinal_position
     ";
 
@@ -35,7 +35,7 @@ Route::get('gen_db_pg', function() {
 		     and kcu.constraint_schema = tco.constraint_schema
 		     and kcu.constraint_name = tco.constraint_name
 		where tco.constraint_type in ('FOREIGN KEY', 'PRIMARY KEY', 'UNIQUE')
-        and kcu.table_name not in ($tableNamesString)
+        --and kcu.table_name not in ($tableNamesString)
 		order by kcu.table_schema,
 		         kcu.table_name,
 		         position
@@ -345,10 +345,10 @@ Route::get('gen_db_pg', function() {
     $spreadsheet->removeSheetByIndex($sheetIndex);
     // Kết thúc xóa sheet template
     $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
-    $filename = 'db_structure_' . date('Ymd_His') . '.xlsx';
+    $filename = env('DB_DATABASE') . date('Ymd_His') . '.xlsx';
     $writer->save($filename);
 
-    dd('done');
+    dd('done '.$filename);
 });
 
 Route::get('gen_db', function(){
@@ -549,7 +549,7 @@ Route::get('gen_db', function(){
         $logic_name = $logic_final;
         $worksheet->getCell('C5')->setValue(ucwords(str_replace('_', " ", $logic_name)));
         $worksheet->getCell('C6')->setValue($table);
-        $worksheet->getCell('F5')->setValue('PgSQL');
+        $worksheet->getCell('F5')->setValue('Mysql');
 
         $data_struct = $datas[$table];
         $data_p = [];
@@ -725,8 +725,9 @@ Route::get('gen_db', function(){
     $writer = \PhpOffice\PhpSpreadsheet\IOFactory::createWriter($spreadsheet, 'Xlsx');
     $filename = 'db_structure_' . date('Ymd_His') . '.xlsx';
     $writer->save($filename);
-
-    dd('done');
+    $tempFilePath = tempnam(sys_get_temp_dir(), $filename);
+    echo 'ok!';
+    return Response::download($tempFilePath, $filename)->deleteFileAfterSend(true);
 });
 Route::get('/test', function () {
     return 'Router is working!';
